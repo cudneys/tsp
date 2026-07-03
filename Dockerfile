@@ -38,17 +38,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         htop \
         iputils-clockdiff \
         dnsmasq-base \
+        zsh \
         vim \
         less \
     && rm -rf /var/lib/apt/lists/*
 
-# Login banner: printed for interactive shells (e.g. `kubectl exec -it ... -- bash`).
+# Make zsh the default interactive shell.
+ENV SHELL=/usr/bin/zsh
+RUN chsh -s /usr/bin/zsh root
+
+# Login banner: printed for interactive shells (e.g. `kubectl exec -it ... -- zsh`).
 COPY motd.sh /etc/profile.d/zz-tsp-motd.sh
 RUN chmod +x /etc/profile.d/zz-tsp-motd.sh \
-    # Non-login interactive bash (what `kubectl exec ... bash` starts) reads
-    # /etc/bash.bashrc rather than /etc/profile, so source the banner there too.
+    # Interactive zsh reads /etc/zsh/zshrc; interactive non-login bash reads
+    # /etc/bash.bashrc. Source the banner from both so either shell shows it.
     && printf '\n# TSP troubleshooting-pod banner\nif [ -n "$PS1" ]; then . /etc/profile.d/zz-tsp-motd.sh; fi\n' \
-       >> /etc/bash.bashrc
+       | tee -a /etc/zsh/zshrc >> /etc/bash.bashrc
 
 # Keep the pod alive so you can `kubectl exec` into it.
 CMD ["sleep", "infinity"]

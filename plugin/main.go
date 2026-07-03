@@ -182,7 +182,7 @@ func deployPod(ctx context.Context, c kubernetes.Interface, namespace string, op
 	} else if existing != nil {
 		fmt.Printf("A troubleshooting pod already exists in namespace %q: %s (%s)\n",
 			namespace, existing.Name, existing.Status.Phase)
-		fmt.Printf("Connect with:\n  kubectl exec -it -n %s %s -- bash\n", namespace, existing.Name)
+		fmt.Printf("Connect with:\n  kubectl exec -it -n %s %s -- zsh\n", namespace, existing.Name)
 		fmt.Printf("Or remove it with:\n  kubectl tsp delete -n %s\n", namespace)
 		return nil
 	}
@@ -203,7 +203,7 @@ func deployPod(ctx context.Context, c kubernetes.Interface, namespace string, op
 		created.Name, namespace, image, netMode, opts.securityProfile)
 	fmt.Printf("Wait for it to be ready, then connect:\n")
 	fmt.Printf("  kubectl wait -n %s --for=condition=Ready pod/%s\n", namespace, created.Name)
-	fmt.Printf("  kubectl exec -it -n %s %s -- bash\n", namespace, created.Name)
+	fmt.Printf("  kubectl exec -it -n %s %s -- zsh\n", namespace, created.Name)
 	return nil
 }
 

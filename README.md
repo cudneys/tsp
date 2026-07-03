@@ -20,7 +20,7 @@ An ephemeral, batteries-included network debugging pod for Kubernetes, plus a
 kubectl tsp
 
 # Wait for it, then drop into a shell (you'll get a command cheatsheet)
-kubectl exec -it tsp -- bash
+kubectl exec -it tsp -- zsh
 
 # Clean up
 kubectl tsp delete
@@ -99,9 +99,10 @@ and exits without creating a duplicate.
 
 ## The pod
 
-When you exec into the pod you get a login banner: a categorized table of every
-installed tool, and a footer showing the pod name, namespace, and node — the
-last two are injected via the Kubernetes **Downward API**:
+The default interactive shell is **zsh** (bash is also available). When you exec
+into the pod you get a login banner: a categorized table of every installed
+tool, and a footer showing the pod name, namespace, and node — the last two are
+injected via the Kubernetes **Downward API**:
 
 | Env var | Downward API field |
 |---|---|
