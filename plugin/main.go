@@ -15,9 +15,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/yaml"
 )
 
 //go:embed manifests/tsp-pod.yaml
@@ -63,6 +63,9 @@ func run(args []string) error {
 	podName := flags.String("pod-name", "tsp", "Name of the pod to create.")
 	hostNetwork := flags.Bool("host-network", false,
 		"Run the pod in the host's network namespace (sets hostNetwork + ClusterFirstWithHostNet DNS) to debug node-level networking.")
+	securityProfile := flags.String("security-profile", "default",
+		"Security profile: 'default' (adds NET_RAW+NET_ADMIN), 'baseline' (no added caps; PodSecurity baseline-compatible), or 'restricted' (fully locked down, connect-only tools).")
+	dryRun := flags.Bool("dry-run", false, "Print the pod manifest that would be created and exit (no cluster changes).")
 	help := flags.BoolP("help", "h", false, "Show help.")
 
 	if err := flags.Parse(args); err != nil {
@@ -105,8 +108,25 @@ func run(args []string) error {
 	case "delete":
 		return deletePod(ctx, clientset, namespace, *podName)
 	default: // deploy
-		return deployPod(ctx, clientset, namespace, *podName, *imageRepo, *imageVersion, *hostNetwork)
+		return deployPod(ctx, clientset, namespace, deployOptions{
+			podName:         *podName,
+			imageRepo:       *imageRepo,
+			imageTag:        *imageVersion,
+			hostNetwork:     *hostNetwork,
+			securityProfile: *securityProfile,
+			dryRun:          *dryRun,
+		})
 	}
+}
+
+// deployOptions captures everything that shapes the pod to be created.
+type deployOptions struct {
+	podName         string
+	imageRepo       string
+	imageTag        string
+	hostNetwork     bool
+	securityProfile string
+	dryRun          bool
 }
 
 // existingTSP returns the first non-terminating pod matching the managed
@@ -124,7 +144,38 @@ func existingTSP(ctx context.Context, c kubernetes.Interface, namespace string) 
 	return nil, nil
 }
 
-func deployPod(ctx context.Context, c kubernetes.Interface, namespace, podName, repo, tag string, hostNetwork bool) error {
+func deployPod(ctx context.Context, c kubernetes.Interface, namespace string, opts deployOptions) error {
+	// Build the pod spec first so --dry-run works without touching the cluster.
+	pod := &corev1.Pod{}
+	if err := yaml.Unmarshal(podManifest, pod); err != nil {
+		return fmt.Errorf("decoding embedded manifest: %w", err)
+	}
+	pod.Name = opts.podName
+	pod.Namespace = namespace
+	if opts.hostNetwork {
+		// Share the node's network namespace and resolve cluster DNS through it.
+		pod.Spec.HostNetwork = true
+		pod.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+	}
+	image := fmt.Sprintf("%s:%s", opts.imageRepo, opts.imageTag)
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "tsp" {
+			pod.Spec.Containers[i].Image = image
+		}
+	}
+	if err := applySecurityProfile(pod, opts.securityProfile); err != nil {
+		return err
+	}
+
+	if opts.dryRun {
+		out, err := yaml.Marshal(pod)
+		if err != nil {
+			return fmt.Errorf("marshalling pod: %w", err)
+		}
+		fmt.Print(string(out))
+		return nil
+	}
+
 	// Pre-check: never deploy a second troubleshooting pod into the namespace.
 	if existing, err := existingTSP(ctx, c, namespace); err != nil {
 		return err
@@ -136,42 +187,70 @@ func deployPod(ctx context.Context, c kubernetes.Interface, namespace, podName, 
 		return nil
 	}
 
-	pod := &corev1.Pod{}
-	if err := yaml.Unmarshal(podManifest, pod); err != nil {
-		return fmt.Errorf("decoding embedded manifest: %w", err)
-	}
-	pod.Name = podName
-	pod.Namespace = namespace
-	if hostNetwork {
-		// Share the node's network namespace and resolve cluster DNS through it.
-		pod.Spec.HostNetwork = true
-		pod.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
-	}
-	image := fmt.Sprintf("%s:%s", repo, tag)
-	for i := range pod.Spec.Containers {
-		if pod.Spec.Containers[i].Name == "tsp" {
-			pod.Spec.Containers[i].Image = image
-		}
-	}
-
 	created, err := c.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("pod %q already exists in namespace %q", podName, namespace)
+			return fmt.Errorf("pod %q already exists in namespace %q", opts.podName, namespace)
 		}
 		return fmt.Errorf("creating pod: %w", err)
 	}
 
 	netMode := "pod network"
-	if hostNetwork {
+	if opts.hostNetwork {
 		netMode = "host network"
 	}
-	fmt.Printf("Deployed troubleshooting pod %q in namespace %q (image %s, %s)\n", created.Name, namespace, image, netMode)
+	fmt.Printf("Deployed troubleshooting pod %q in namespace %q (image %s, %s, %s profile)\n",
+		created.Name, namespace, image, netMode, opts.securityProfile)
 	fmt.Printf("Wait for it to be ready, then connect:\n")
 	fmt.Printf("  kubectl wait -n %s --for=condition=Ready pod/%s\n", namespace, created.Name)
 	fmt.Printf("  kubectl exec -it -n %s %s -- bash\n", namespace, created.Name)
 	return nil
 }
+
+// applySecurityProfile rewrites each container's securityContext according to
+// the requested PodSecurity posture.
+//
+//   - default:    keep the manifest's NET_RAW + NET_ADMIN (needs a privileged
+//     or unrestricted namespace).
+//   - baseline:   add no capabilities. The runtime's default set still includes
+//     NET_RAW, so tcpdump/tshark/ping/nmap keep working; only NET_ADMIN
+//     (route/nftables edits) is lost. Satisfies the PodSecurity "baseline" level.
+//   - restricted: drop ALL capabilities, run as non-root with a seccomp profile
+//     and no privilege escalation. Satisfies "restricted"; only connect-based
+//     tools (curl, dig, nc, nmap -sT, iperf3, ss, jq) work — no raw sockets.
+func applySecurityProfile(pod *corev1.Pod, profile string) error {
+	switch profile {
+	case "default":
+		return nil
+	case "baseline", "restricted":
+		// handled below
+	default:
+		return fmt.Errorf("unknown security profile %q (want: default, baseline, restricted)", profile)
+	}
+
+	for i := range pod.Spec.Containers {
+		sc := pod.Spec.Containers[i].SecurityContext
+		if sc == nil {
+			sc = &corev1.SecurityContext{}
+		}
+		switch profile {
+		case "baseline":
+			// Drop the explicit add list; rely on the default capability set.
+			sc.Capabilities = nil
+		case "restricted":
+			sc.Capabilities = &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}
+			sc.AllowPrivilegeEscalation = boolPtr(false)
+			sc.RunAsNonRoot = boolPtr(true)
+			sc.RunAsUser = int64Ptr(65532)
+			sc.SeccompProfile = &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+		}
+		pod.Spec.Containers[i].SecurityContext = sc
+	}
+	return nil
+}
+
+func boolPtr(b bool) *bool    { return &b }
+func int64Ptr(i int64) *int64 { return &i }
 
 func deletePod(ctx context.Context, c kubernetes.Interface, namespace, podName string) error {
 	err := c.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})

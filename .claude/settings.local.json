@@ -21,7 +21,8 @@
       "Bash(kubectl apply *)",
       "Bash(rm -f /tmp/kubectl-tsp)",
       "Bash(/tmp/kubectl-tsp --help)",
-      "Bash(go vet *)"
+      "Bash(go vet *)",
+      "Bash(./kubectl-tsp deploy *)"
     ]
   }
 }

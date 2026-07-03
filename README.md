@@ -69,6 +69,8 @@ sudo install kubectl-tsp /usr/local/bin/kubectl-tsp
 | `--image-repo` | `ghcr.io/cudneys/tsp` | Image repository (without tag). |
 | `--pod-name` | `tsp` | Name of the pod to create. |
 | `--host-network` | `false` | Run in the **node's** network namespace to debug node-level networking (sets `hostNetwork` + `ClusterFirstWithHostNet` DNS). |
+| `--security-profile` | `default` | Security posture: `default`, `baseline`, or `restricted` (see [PodSecurity](#podsecurity--capabilities)). |
+| `--dry-run` | `false` | Print the pod manifest that would be created and exit (no cluster changes). |
 | `--namespace`, `--context`, `--kubeconfig`, … | — | Standard `kubectl` config flags. |
 
 The pod version **defaults to the plugin's own version**, so a plugin built at
@@ -107,8 +109,38 @@ last two are injected via the Kubernetes **Downward API**:
 | `POD_NAMESPACE` | `metadata.namespace` |
 | `NODE_NAME` | `spec.nodeName` |
 
-The pod runs with `NET_RAW` + `NET_ADMIN` capabilities so raw-socket tools
-(`tcpdump`, `tshark`, `nmap`, `ping`) and route/firewall manipulation work.
+### PodSecurity & capabilities
+
+By default the pod adds `NET_RAW` + `NET_ADMIN` so raw-socket tools and
+route/firewall manipulation work. But clusters that enforce the
+[PodSecurity](https://kubernetes.io/docs/concepts/security/pod-security-standards/)
+`baseline` or `restricted` standard (e.g. Talos out of the box) reject added
+capabilities:
+
+```
+pods "tsp" is forbidden: violates PodSecurity "baseline:latest":
+non-default capabilities (must not include "NET_ADMIN", "NET_RAW" ...)
+```
+
+Use `--security-profile` to pick a compliant posture:
+
+| Profile | securityContext | Works | Doesn't work |
+|---|---|---|---|
+| `default` | adds `NET_RAW`, `NET_ADMIN` | everything | needs a privileged/unrestricted namespace |
+| `baseline` | no added capabilities | `tcpdump`, `tshark`, `ping`, `nmap`, and all connect tools | `nft`/route edits (`NET_ADMIN`) |
+| `restricted` | drop `ALL`, non-root, seccomp, no priv-esc | connect-only: `curl`, `dig`, `nc`, `nmap -sT`, `iperf3`, `ss`, `jq` | raw sockets: `tcpdump`, `ping`, raw `nmap` |
+
+The key insight: the container runtime's **default capability set already
+includes `NET_RAW`**, so `baseline` keeps packet capture and ping working — it
+only loses `NET_ADMIN`, which you need solely to *modify* routes/nftables.
+
+```bash
+# Talos / baseline-enforced clusters
+kubectl tsp deploy --security-profile baseline
+
+# Preview the exact manifest for any profile without deploying
+kubectl tsp deploy --security-profile restricted --dry-run
+```
 
 ### Manifests
 
