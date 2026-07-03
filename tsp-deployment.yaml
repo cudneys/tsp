@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tsp
+  labels:
+    app: tsp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tsp
+  template:
+    metadata:
+      labels:
+        app: tsp
+    spec:
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: tsp
+          # Replace with your built image, e.g. registry.example.com/tsp-nettools:latest
+          image: tsp-nettools:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "infinity"]
+          env:
+            # Downward API: surface pod identity to the login banner.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            capabilities:
+              # NET_RAW  -> tcpdump/tshark/nmap raw sockets, ping
+              # NET_ADMIN -> manipulate routes, interfaces, nftables
+              add: ["NET_RAW", "NET_ADMIN"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

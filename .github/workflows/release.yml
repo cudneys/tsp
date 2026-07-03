@@ -1,0 +1,111 @@
+name: release
+
+# Fire only on semver tags like v1.2.3.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write # create GitHub releases + upload assets
+  packages: write # push container image to GHCR
+
+env:
+  IMAGE_NAME: tsp
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build & push the troubleshooting-pod container image.
+  # Publishes ONLY the exact version tag (1.2.3) — never 1, 1.2, or latest.
+  # ---------------------------------------------------------------------------
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase image repo
+        id: repo
+        run: echo "value=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.repo.outputs.value }}
+          # latest=false disables the implicit :latest tag.
+          flavor: latest=false
+          # {{version}} is the full semver (1.2.3) with no partial (1 / 1.2) tags.
+          tags: type=semver,pattern={{version}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ---------------------------------------------------------------------------
+  # Build the kubectl-tsp plugin at the SAME version and attach it to a release.
+  # ---------------------------------------------------------------------------
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: plugin/go.mod
+          cache-dependency-path: plugin/go.sum
+
+      - name: Derive version and image repo
+        id: vars
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image_repo=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build cross-platform binaries
+        working-directory: plugin
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          IMAGE_REPO: ${{ steps.vars.outputs.image_repo }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.defaultImageRepo=${IMAGE_REPO}"
+          platforms=(linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64)
+          for p in "${platforms[@]}"; do
+            os="${p%/*}"; arch="${p#*/}"
+            bin="kubectl-tsp"
+            [ "$os" = "windows" ] && bin="kubectl-tsp.exe"
+            echo "building $os/$arch"
+            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "$LDFLAGS" -o "$bin" .
+            archive="kubectl-tsp_${VERSION}_${os}_${arch}"
+            if [ "$os" = "windows" ]; then
+              zip -q "dist/${archive}.zip" "$bin"
+            else
+              tar -czf "dist/${archive}.tar.gz" "$bin"
+            fi
+            rm -f "$bin"
+          done
+          (cd dist && sha256sum * > "kubectl-tsp_${VERSION}_checksums.txt")
+          ls -l dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: plugin/dist/*
+          generate_release_notes: true

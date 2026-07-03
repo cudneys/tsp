@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(command -v docker)",
+      "Bash(docker build *)",
+      "Bash(docker run *)",
+      "Bash(go version *)",
+      "Bash(go env *)",
+      "Bash(timeout 10 go env GOPROXY)",
+      "Bash(go mod *)",
+      "Bash(go get *)",
+      "Bash(go build *)",
+      "Bash(./kubectl-tsp version *)",
+      "Bash(./kubectl-tsp --help)",
+      "Bash(python3 -c \"import yaml,sys; yaml.safe_load\\(open\\('.github/workflows/release.yml'\\)\\); print\\('workflow YAML: valid'\\)\")",
+      "Bash(command -v yq)",
+      "Bash(yq eval *)",
+      "Bash(command -v ruby)",
+      "Bash(ruby -ryaml -e \"YAML.load_file\\('.github/workflows/release.yml'\\); puts 'ruby yaml: valid'\")",
+      "Bash(command -v node)",
+      "Bash(kubectl apply *)",
+      "Bash(rm -f /tmp/kubectl-tsp)",
+      "Bash(/tmp/kubectl-tsp --help)",
+      "Bash(go vet *)"
+    ]
+  }
+}
