@@ -16,15 +16,17 @@ An ephemeral, batteries-included network debugging pod for Kubernetes, plus a
 ## Quick start
 
 ```bash
-# Deploy a troubleshooting pod into your current namespace
+# Deploy a troubleshooting pod, wait for it, and drop straight into a shell.
+# If a pod already exists in the namespace, this just attaches to it.
 kubectl tsp
 
-# Wait for it, then drop into a shell (you'll get a command cheatsheet)
-kubectl exec -it tsp -- zsh
-
-# Clean up
+# ... troubleshoot, then exit the shell. Clean up when done:
 kubectl tsp delete
 ```
+
+`kubectl tsp` is a single deploy-or-attach-and-exec command: it creates the pod
+if needed, monitors it until it's ready, then `exec`s you into a shell (you'll
+get a command cheatsheet). Run it again later and it reconnects to the same pod.
 
 ---
 
@@ -56,7 +58,7 @@ sudo install kubectl-tsp /usr/local/bin/kubectl-tsp
 
 | Command | Description |
 |---|---|
-| `kubectl tsp` / `kubectl tsp deploy` | Deploy a pod into the current namespace. No-op if one already exists. |
+| `kubectl tsp` / `kubectl tsp deploy` | Deploy a pod (or attach to an existing one), wait for readiness, and exec into a shell. |
 | `kubectl tsp status` | Show the troubleshooting pod in the namespace, if any. |
 | `kubectl tsp delete` | Delete the troubleshooting pod. |
 | `kubectl tsp version` | Print the plugin version. |
@@ -70,6 +72,8 @@ sudo install kubectl-tsp /usr/local/bin/kubectl-tsp
 | `--pod-name` | `tsp` | Name of the pod to create. |
 | `--host-network` | `false` | Run in the **node's** network namespace to debug node-level networking (sets `hostNetwork` + `ClusterFirstWithHostNet` DNS). |
 | `--security-profile` | `default` | Security posture: `default`, `baseline`, or `restricted` (see [PodSecurity](#podsecurity--capabilities)). |
+| `--no-exec` | `false` | Deploy only — don't wait for readiness or exec into the pod. |
+| `--timeout` | `2m` | How long to wait for the pod to become ready before exec'ing in. |
 | `--dry-run` | `false` | Print the pod manifest that would be created and exit (no cluster changes). |
 | `--namespace`, `--context`, `--kubeconfig`, … | — | Standard `kubectl` config flags. |
 

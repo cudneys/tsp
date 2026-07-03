@@ -22,7 +22,11 @@
       "Bash(rm -f /tmp/kubectl-tsp)",
       "Bash(/tmp/kubectl-tsp --help)",
       "Bash(go vet *)",
-      "Bash(./kubectl-tsp deploy *)"
+      "Bash(./kubectl-tsp deploy *)",
+      "Bash(kubectl config *)",
+      "Bash(kubectl cluster-info *)",
+      "Bash(command -v kind)",
+      "Bash(kind get *)"
     ]
   }
 }
