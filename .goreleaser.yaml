@@ -1,0 +1,60 @@
+# GoReleaser builds the kubectl-tsp plugin, publishes archives + checksums to
+# the GitHub release, and pushes a Homebrew formula to the tap repo.
+# Installing via `brew` strips the macOS quarantine attribute, so there is no
+# Gatekeeper prompt.
+#
+# Validate locally with:  goreleaser check
+version: 2
+
+project_name: kubectl-tsp
+
+builds:
+  - id: kubectl-tsp
+    dir: ./plugin # build from the module directory
+    main: .
+    binary: kubectl-tsp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.defaultImageRepo=ghcr.io/cudneys/tsp
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+
+# Homebrew tap (cask). Requires a repo `cudneys/homebrew-tap` and a token
+# (HOMEBREW_TAP_TOKEN) with write access to it. GoReleaser's cask output
+# de-quarantines the binary on install, so there is no macOS Gatekeeper prompt.
+homebrew_casks:
+  - name: kubectl-tsp
+    repository:
+      owner: cudneys
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/cudneys/tsp"
+    description: "kubectl plugin that deploys an ephemeral network troubleshooting pod"
+    caveats: |
+      Installed as a kubectl plugin. Invoke it with:
+        kubectl tsp
+
+release:
+  # Owner/name are auto-detected from the git remote in CI.
+  prerelease: auto

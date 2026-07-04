@@ -57,55 +57,28 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
   # ---------------------------------------------------------------------------
-  # Build the kubectl-tsp plugin at the SAME version and attach it to a release.
+  # Build the kubectl-tsp plugin at the SAME version via GoReleaser: publishes
+  # archives + checksums to the GitHub release and pushes the Homebrew cask.
+  # (Installing via brew de-quarantines the binary — no macOS Gatekeeper prompt.)
   # ---------------------------------------------------------------------------
   plugin:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # GoReleaser needs full history + tags
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: plugin/go.mod
           cache-dependency-path: plugin/go.sum
 
-      - name: Derive version and image repo
-        id: vars
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "image_repo=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
-
-      - name: Build cross-platform binaries
-        working-directory: plugin
-        env:
-          VERSION: ${{ steps.vars.outputs.version }}
-          IMAGE_REPO: ${{ steps.vars.outputs.image_repo }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          LDFLAGS="-s -w -X main.version=${VERSION} -X main.defaultImageRepo=${IMAGE_REPO}"
-          platforms=(linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64)
-          for p in "${platforms[@]}"; do
-            os="${p%/*}"; arch="${p#*/}"
-            bin="kubectl-tsp"
-            [ "$os" = "windows" ] && bin="kubectl-tsp.exe"
-            echo "building $os/$arch"
-            GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 \
-              go build -trimpath -ldflags "$LDFLAGS" -o "$bin" .
-            archive="kubectl-tsp_${VERSION}_${os}_${arch}"
-            if [ "$os" = "windows" ]; then
-              zip -q "dist/${archive}.zip" "$bin"
-            else
-              tar -czf "dist/${archive}.tar.gz" "$bin"
-            fi
-            rm -f "$bin"
-          done
-          (cd dist && sha256sum * > "kubectl-tsp_${VERSION}_checksums.txt")
-          ls -l dist
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+      - uses: goreleaser/goreleaser-action@v6
         with:
-          files: plugin/dist/*
-          generate_release_notes: true
+          version: "~> v2"
+          args: release --clean
+        env:
+          # Publishes the release to this repo.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with write access to cudneys/homebrew-tap (see README).
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

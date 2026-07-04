@@ -26,7 +26,9 @@
       "Bash(kubectl config *)",
       "Bash(kubectl cluster-info *)",
       "Bash(command -v kind)",
-      "Bash(kind get *)"
+      "Bash(kind get *)",
+      "Bash(go run *)",
+      "Bash(ruby *)"
     ]
   }
 }

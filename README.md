@@ -37,16 +37,32 @@ it as `kubectl tsp`.
 
 ### Install
 
-Download the archive for your platform from the
-[latest release](https://github.com/cudneys/tsp/releases), then:
+**Homebrew (recommended, macOS/Linux):**
 
 ```bash
-tar -xzf kubectl-tsp_*_linux_amd64.tar.gz
+brew install cudneys/tap/kubectl-tsp
+kubectl tsp version
+```
+
+This is the smoothest path on macOS: Homebrew de-quarantines the binary, so
+there is **no Gatekeeper prompt** (the "unverified developer" dialog you get
+from a raw browser download).
+
+**Manual download:**
+
+```bash
+# Grab the archive for your platform from the latest release:
+#   https://github.com/cudneys/tsp/releases
+tar -xzf kubectl-tsp_*_darwin_arm64.tar.gz
+
+# macOS only: clear the download quarantine so Gatekeeper doesn't block it.
+xattr -d com.apple.quarantine kubectl-tsp 2>/dev/null || true
+
 sudo install kubectl-tsp /usr/local/bin/kubectl-tsp
 kubectl tsp version
 ```
 
-Or build it yourself:
+**Build it yourself:**
 
 ```bash
 cd plugin
@@ -172,13 +188,30 @@ Releases are cut by pushing a semver tag. The
 1. Builds the container image (`linux/amd64` + `linux/arm64`) and pushes it to
    `ghcr.io/cudneys/tsp` tagged with **only** the exact version (`1.2.3`) —
    never `1`, `1.2`, or `latest`.
-2. Builds the `kubectl-tsp` plugin at the **same version** for linux, macOS, and
-   Windows, and attaches the archives + checksums to a GitHub release.
+2. Runs [GoReleaser](https://goreleaser.com) (config: [`.goreleaser.yaml`](.goreleaser.yaml))
+   to build the `kubectl-tsp` plugin at the **same version** for linux, macOS,
+   and Windows, attach the archives + checksums to the GitHub release, and push
+   an updated Homebrew cask to the tap.
 
 ```bash
 git tag v1.2.3
 git push origin v1.2.3
 ```
+
+### One-time setup for the Homebrew tap
+
+The tap publishing needs two things:
+
+1. A GitHub repo named **`cudneys/homebrew-tap`** (this is what makes
+   `brew install cudneys/tap/...` work).
+2. A repo secret **`HOMEBREW_TAP_TOKEN`** — a fine-grained PAT (or classic PAT
+   with `repo` scope) that has **write access to `cudneys/homebrew-tap`**. The
+   default `GITHUB_TOKEN` can't push to another repository, so this separate
+   token is required.
+
+Add it under **Settings → Secrets and variables → Actions** on the `tsp` repo.
+Without it, the release still publishes the image + binaries; only the cask push
+fails.
 
 ---
 
@@ -193,5 +226,6 @@ git push origin v1.2.3
 ├── plugin/                  # kubectl-tsp Go plugin
 │   ├── main.go
 │   └── manifests/tsp-pod.yaml   # manifest embedded into the binary
+├── .goreleaser.yaml         # plugin build + Homebrew tap publishing
 └── .github/workflows/release.yml
 ```
