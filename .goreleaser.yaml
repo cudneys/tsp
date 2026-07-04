@@ -51,6 +51,14 @@ homebrew_casks:
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/cudneys/tsp"
     description: "kubectl plugin that deploys an ephemeral network troubleshooting pod"
+    # The binary is unsigned, so strip the download quarantine on install —
+    # otherwise macOS Gatekeeper blocks it with "Apple could not verify...".
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/kubectl-tsp"]
+          end
     caveats: |
       Installed as a kubectl plugin. Invoke it with:
         kubectl tsp
