@@ -8,8 +8,6 @@ An ephemeral, batteries-included network debugging pod for Kubernetes, plus a
   and more). Prints a command cheatsheet when you exec in.
 - **`kubectl-tsp` plugin** — deploys the pod, refuses to create a second one in a
   namespace, and lets you pick the pod image version.
-- **Release workflow** — a Git tag `vX.Y.Z` builds and publishes both the image
-  and the plugin binaries at the same version.
 
 ---
 
@@ -219,52 +217,3 @@ kubectl apply -f tsp-pod.yaml
 
 ---
 
-## Releasing
-
-Releases are cut by pushing a semver tag. The
-[`release` workflow](.github/workflows/release.yml) then:
-
-1. Builds the container image (`linux/amd64` + `linux/arm64`) and pushes it to
-   `ghcr.io/cudneys/tsp` tagged with **only** the exact version (`1.2.3`) —
-   never `1`, `1.2`, or `latest`.
-2. Runs [GoReleaser](https://goreleaser.com) (config: [`.goreleaser.yaml`](.goreleaser.yaml))
-   to build the `kubectl-tsp` plugin at the **same version** for linux, macOS,
-   and Windows, attach the archives + checksums to the GitHub release, and push
-   an updated Homebrew cask to the tap.
-
-```bash
-git tag v1.2.3
-git push origin v1.2.3
-```
-
-### One-time setup for the Homebrew tap
-
-The tap publishing needs two things:
-
-1. A GitHub repo named **`cudneys/homebrew-tap`** (this is what makes
-   `brew install cudneys/tap/...` work).
-2. A repo secret **`HOMEBREW_TAP_TOKEN`** — a fine-grained PAT (or classic PAT
-   with `repo` scope) that has **write access to `cudneys/homebrew-tap`**. The
-   default `GITHUB_TOKEN` can't push to another repository, so this separate
-   token is required.
-
-Add it under **Settings → Secrets and variables → Actions** on the `tsp` repo.
-Without it, the release still publishes the image + binaries; only the cask push
-fails.
-
----
-
-## Repository layout
-
-```
-.
-├── Dockerfile               # troubleshooting-pod image
-├── motd.sh                  # login banner baked into the image
-├── tsp-pod.yaml             # standalone Pod manifest
-├── tsp-deployment.yaml      # standalone Deployment manifest
-├── plugin/                  # kubectl-tsp Go plugin
-│   ├── main.go
-│   └── manifests/tsp-pod.yaml   # manifest embedded into the binary
-├── .goreleaser.yaml         # plugin build + Homebrew tap publishing
-└── .github/workflows/release.yml
-```
