@@ -11,28 +11,6 @@ An ephemeral, batteries-included network debugging pod for Kubernetes, plus a
 
 ---
 
-## Quick start
-
-```bash
-# Deploy a troubleshooting pod, wait for it, and drop straight into a shell.
-# If a pod already exists in the namespace, this just attaches to it.
-kubectl tsp
-
-# ... troubleshoot, then exit the shell. Clean up when done:
-kubectl tsp delete
-```
-
-`kubectl tsp` is a single deploy-or-attach-and-exec command: it creates the pod
-if needed, monitors it until it's ready, then `exec`s you into a shell (you'll
-get a command cheatsheet). Run it again later and it reconnects to the same pod.
-
----
-
-## The `kubectl-tsp` plugin
-
-`kubectl` discovers any executable named `kubectl-tsp` on your `PATH` and exposes
-it as `kubectl tsp`.
-
 ### Install
 
 **Homebrew (recommended, macOS/Linux):**
