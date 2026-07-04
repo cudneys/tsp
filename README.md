@@ -90,6 +90,8 @@ sudo install kubectl-tsp /usr/local/bin/kubectl-tsp
 | `--security-profile` | `default` | Security posture: `default`, `baseline`, or `restricted` (see [PodSecurity](#podsecurity--capabilities)). |
 | `--no-exec` | `false` | Deploy only — don't wait for readiness or exec into the pod. |
 | `--timeout` | `2m` | How long to wait for the pod to become ready before exec'ing in. |
+| `--rm` | `false` | Delete the pod when the exec session ends (like `kubectl run --rm -it`). |
+| `--ttl` | `0` (off) | Max pod lifetime (e.g. `1h`); Kubernetes terminates it after this via `activeDeadlineSeconds`. A backstop for abandoned sessions. |
 | `--dry-run` | `false` | Print the pod manifest that would be created and exit (no cluster changes). |
 | `--namespace`, `--context`, `--kubeconfig`, … | — | Standard `kubectl` config flags. |
 
@@ -107,6 +109,13 @@ kubectl tsp deploy --host-network
 
 # Target a specific namespace
 kubectl tsp deploy -n kube-system
+
+# Ephemeral: delete the pod as soon as you exit the shell
+kubectl tsp --rm
+
+# Self-cleaning with a safety cap: removed on exit, or killed by Kubernetes
+# after 1h if the session is abandoned
+kubectl tsp --rm --ttl 1h
 ```
 
 ### Namespace safety
@@ -114,6 +123,36 @@ kubectl tsp deploy -n kube-system
 Before deploying, the plugin lists pods labeled `app=tsp` in the current
 namespace. If one already exists it prints how to connect to it (or remove it)
 and exits without creating a duplicate.
+
+### Cleanup
+
+A standalone Pod is **never auto-deleted** by Kubernetes: `restartPolicy: Never`
+(which the pod uses) only stops the *container* from restarting — when it exits
+or the node reboots, the Pod object lingers in `Completed`/`Failed`. There is no
+built-in TTL for bare Pods. So cleanup is explicit:
+
+| Mechanism | What it does | Removes the Pod object? |
+|---|---|---|
+| `kubectl tsp delete` | Deletes the troubleshooting pod in the namespace. | ✅ |
+| `--rm` | Deletes the pod when your exec session ends (client-side). | ✅ |
+| `--ttl <dur>` | Sets `activeDeadlineSeconds`; **Kubernetes** stops the pod after the duration. | ❌ stops it (→ `DeadlineExceeded`), object remains until GC |
+
+The two flags compose: `--rm` handles the normal "clean up when I'm done" exit,
+while `--ttl` is a server-side backstop that fires even if the session is
+abandoned (laptop sleeps, plugin killed, network drops).
+
+```bash
+# Deleted the moment you exit the shell
+kubectl tsp --rm
+
+# Deleted on exit, or force-stopped by Kubernetes after 1h if abandoned
+kubectl tsp --rm --ttl 1h
+```
+
+> `--ttl` alone caps the pod's *runtime* but leaves a stopped Pod object behind;
+> pair it with `--rm` (or run `kubectl tsp delete`) to remove the object. For a
+> guaranteed server-side deletion you'd model the pod as a Job with
+> `ttlSecondsAfterFinished` — overkill for an interactive debug pod.
 
 ---
 

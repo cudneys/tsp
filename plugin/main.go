@@ -71,6 +71,8 @@ func run(args []string) error {
 	dryRun := flags.Bool("dry-run", false, "Print the pod manifest that would be created and exit (no cluster changes).")
 	noExec := flags.Bool("no-exec", false, "Deploy only; do not wait for readiness or exec into the pod.")
 	timeout := flags.Duration("timeout", 2*time.Minute, "How long to wait for the pod to become ready before exec'ing in.")
+	rm := flags.Bool("rm", false, "Delete the pod when the exec session ends.")
+	ttl := flags.Duration("ttl", 0, "Maximum pod lifetime (e.g. 1h); Kubernetes terminates it after this. 0 disables the cap (sets activeDeadlineSeconds).")
 	help := flags.BoolP("help", "h", false, "Show help.")
 
 	if err := flags.Parse(args); err != nil {
@@ -122,6 +124,8 @@ func run(args []string) error {
 			dryRun:          *dryRun,
 			noExec:          *noExec,
 			timeout:         *timeout,
+			rm:              *rm,
+			ttl:             *ttl,
 		})
 	}
 }
@@ -136,6 +140,8 @@ type deployOptions struct {
 	dryRun          bool
 	noExec          bool
 	timeout         time.Duration
+	rm              bool
+	ttl             time.Duration
 }
 
 // existingTSP returns the first non-terminating pod matching the managed
@@ -178,6 +184,7 @@ func deployPod(ctx context.Context, c kubernetes.Interface, cf *genericclioption
 		return err
 	}
 	podName := opts.podName
+	justCreated := false
 	if existing != nil {
 		podName = existing.Name
 		fmt.Printf("Found existing troubleshooting pod %q in namespace %q (%s)\n",
@@ -191,12 +198,17 @@ func deployPod(ctx context.Context, c kubernetes.Interface, cf *genericclioption
 			return fmt.Errorf("creating pod: %w", err)
 		}
 		podName = created.Name
+		justCreated = true
 		netMode := "pod network"
 		if opts.hostNetwork {
 			netMode = "host network"
 		}
-		fmt.Printf("Deployed troubleshooting pod %q in namespace %q (image %s, %s, %s profile)\n",
-			podName, namespace, image, netMode, opts.securityProfile)
+		lifetime := ""
+		if opts.ttl > 0 {
+			lifetime = fmt.Sprintf(", %s lifetime", opts.ttl)
+		}
+		fmt.Printf("Deployed troubleshooting pod %q in namespace %q (image %s, %s, %s profile%s)\n",
+			podName, namespace, image, netMode, opts.securityProfile, lifetime)
 	}
 
 	if opts.noExec {
@@ -205,9 +217,35 @@ func deployPod(ctx context.Context, c kubernetes.Interface, cf *genericclioption
 	}
 
 	if err := waitForReady(ctx, c, namespace, podName, opts.timeout); err != nil {
+		// Don't leave a broken pod behind if --rm asked us to clean up our own.
+		if opts.rm && justCreated {
+			removePod(ctx, c, namespace, podName)
+		}
 		return err
 	}
-	return execInto(namespace, podName, connectionFlags(cf))
+
+	exitCode, execErr := execInto(namespace, podName, connectionFlags(cf))
+
+	if opts.rm {
+		removePod(ctx, c, namespace, podName)
+	}
+	if execErr != nil {
+		return execErr
+	}
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+	return nil
+}
+
+// removePod best-effort deletes the pod, warning (but not failing) on error.
+func removePod(ctx context.Context, c kubernetes.Interface, namespace, name string) {
+	fmt.Printf("Removing pod %q...\n", name)
+	if err := c.CoreV1().Pods(namespace).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			fmt.Fprintf(os.Stderr, "warning: failed to delete pod %q: %v\n", name, err)
+		}
+	}
 }
 
 // buildPod decodes the embedded manifest and applies the requested options,
@@ -223,6 +261,10 @@ func buildPod(namespace string, opts deployOptions) (*corev1.Pod, string, error)
 		// Share the node's network namespace and resolve cluster DNS through it.
 		pod.Spec.HostNetwork = true
 		pod.Spec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+	}
+	if secs := int64(opts.ttl.Seconds()); secs > 0 {
+		// Hard lifetime cap: Kubernetes terminates the pod after this many seconds.
+		pod.Spec.ActiveDeadlineSeconds = int64Ptr(secs)
 	}
 	image := fmt.Sprintf("%s:%s", opts.imageRepo, opts.imageTag)
 	for i := range pod.Spec.Containers {
@@ -301,10 +343,12 @@ func connectionFlags(cf *genericclioptions.ConfigFlags) []string {
 
 // execInto hands the terminal over to `kubectl exec -it ... -- zsh`. kubectl is
 // always present for a kubectl plugin and handles TTY setup cross-platform.
-func execInto(namespace, podName string, connFlags []string) error {
+// It returns the shell's exit code so the caller can run cleanup (e.g. --rm)
+// before propagating it.
+func execInto(namespace, podName string, connFlags []string) (int, error) {
 	kubectl, err := exec.LookPath("kubectl")
 	if err != nil {
-		return fmt.Errorf("kubectl not found on PATH: %w", err)
+		return 0, fmt.Errorf("kubectl not found on PATH: %w", err)
 	}
 	args := []string{"exec", "-it", "-n", namespace}
 	args = append(args, connFlags...)
@@ -313,13 +357,13 @@ func execInto(namespace, podName string, connFlags []string) error {
 	cmd := exec.Command(kubectl, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
-		// Propagate the shell's exit code without decorating it as an error.
+		// A non-zero shell exit is not a plugin error; return its code.
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
+			return exitErr.ExitCode(), nil
 		}
-		return fmt.Errorf("exec into pod %q: %w", podName, err)
+		return 0, fmt.Errorf("exec into pod %q: %w", podName, err)
 	}
-	return nil
+	return 0, nil
 }
 
 // applySecurityProfile rewrites each container's securityContext according to
