@@ -73,6 +73,7 @@ if [ -z "${TSP_MOTD_SHOWN:-}" ]; then
   _rule '├' '┼' '┤'
   _cat 'UTILITIES'
   _row 'jq'         'filter & format JSON'
+  _row 'yq'         'filter & format YAML'
   _row 'lsof'       'list open files / sockets'
   _row 'strace'     'trace syscalls of a process'
   _row 'htop'       'interactive process viewer'
