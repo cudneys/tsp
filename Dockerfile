@@ -40,9 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         iputils-clockdiff \
         dnsmasq-base \
         zsh \
-        vim \
-        less \
-    && rm -rf /var/lib/apt/lists/*
+        vim  less gnupg
+#        less \
+#    && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://pgp.mongodb.com/server-8.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
 RUN echo "deb [signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/debian trixie/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
