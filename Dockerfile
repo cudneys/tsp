@@ -44,6 +44,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         less \
     && rm -rf /var/lib/apt/lists/*
 
+RUN curl -fsSL https://pgp.mongodb.com/server-8.0.asc | gpg --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+RUN echo "deb [signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/debian trixie/mongodb-org/8.0 main" | tee /etc/apt/sources.list.d/mongodb-org-8.0.list
+RUN apt update
+RUN apt install -y mongodb-mongosh
+RUN mongosh --version
+
 # Make zsh the default interactive shell.
 ENV SHELL=/usr/bin/zsh
 RUN chsh -s /usr/bin/zsh root
